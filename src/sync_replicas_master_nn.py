@@ -197,13 +197,7 @@ class SyncReplicasMaster_NN(NN_Trainer):
             for layer_index, layer in enumerate(self.network.parameters()):
                 # rev grad --> update model
                 recv_msgs=self.comm.gather(self.grad_accumulator.gather_buffer[layer_index], root=0)
-                self._decompress_recv_msgs(self.grad_accumulator.gather_buffer[layer_index], layer_index)
-
-            grad_gather_duration = time.time()-grad_gather_start_time
-            print("Master: gradient gather time: {:.4f}".format(grad_gather_duration))
-            # average gradients and update the mode
-            for i in range(len(self._grad_aggregate_buffer)):
-                self._grad_aggregate_buffer[i] /= self._expected_grad_to_recv
+                self._decompress_recv_msgs(recv_msgs, layer_index)
 
             # update using SGD method
             tmp_module = []
@@ -271,7 +265,7 @@ class SyncReplicasMaster_NN(NN_Trainer):
         return gradient_fetch_requests
 
     def _aggregate_gradient(self, grads, layer_index):
-        self._grad_aggregate_buffer[layer_index] = reduce(np.add, grads)
+        self._grad_aggregate_buffer[layer_index] = reduce(np.add, grads) / self._expected_grad_to_recv
 
     def _decompress_recv_msgs(self, recv_buf, layer_index):
         grads = [g_decompress(recv_buf[i]) for i in range(1, len(recv_buf))]
