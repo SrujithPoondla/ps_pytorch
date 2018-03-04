@@ -194,15 +194,15 @@ class SyncReplicasMaster_NN(NN_Trainer):
                 for j in self.grad_accumulator.gradient_aggregate_counter:
                     enough_gradients_received = enough_gradients_received and (j >= self._num_grad_to_collect)
             '''
-            for layer_idx, layer in enumerate(self.network.parameters()):
-                self.gather_buffer[layer_idx]=self.comm.gather(self.gather_buffer[layer_idx], root=0)
-            # need some test here
+            for layer_index, layer in enumerate(self.network.parameters()):
+                # rev grad --> update model
+                recv_msgs=self.comm.gather(self.grad_accumulator.gather_buffer[layer_index], root=0)
+                self._decompress_recv_msgs(self.grad_accumulator.gather_buffer[layer_index], layer_index)
 
             grad_gather_duration = time.time()-grad_gather_start_time
             print("Master: gradient gather time: {:.4f}".format(grad_gather_duration))
             # average gradients and update the mode
             for i in range(len(self._grad_aggregate_buffer)):
-                #self._grad_aggregate_buffer[i] /= self._num_grad_to_collect
                 self._grad_aggregate_buffer[i] /= self._expected_grad_to_recv
 
             # update using SGD method
@@ -270,9 +270,12 @@ class SyncReplicasMaster_NN(NN_Trainer):
                 gradient_fetch_requests.append(req)
         return gradient_fetch_requests
 
-    def aggregate_gradient(self, gradient, layer_idx):
-        '''keep in mind the gradient here is wrapped gradient, which means it contains `W` and `b`'''
-        self._grad_aggregate_buffer[layer_idx] += gradient
+    def _aggregate_gradient(self, grads, layer_index):
+        self._grad_aggregate_buffer[layer_index] = reduce(np.add, grads)
+
+    def _decompress_recv_msgs(self, recv_buf, layer_index):
+        grads = [g_decompress(recv_buf[i]) for i in range(1, len(recv_buf))]
+        self._aggregate_gradient(grads, layer_index)
 
     def model_update(self, tmp_module):
         """
