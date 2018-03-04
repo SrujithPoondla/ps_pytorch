@@ -52,10 +52,12 @@ class GradientAccumulator(object):
         self.gradient_aggregate_counter = []
         self.model_index_range = []
         self.gradient_aggregator = []
+        self.gather_buffer = []
         self._mode = mode
         
         for param_idx, param in enumerate(module.parameters()):
             tmp_aggregator = []
+            self.gather_buffer.append(np.zeros(param.shape))
             for worker_idx in range(num_worker):
                 if self._mode == 'None':
                     tmp_aggregator.append(np.zeros((param.size())))
@@ -156,6 +158,7 @@ class SyncReplicasMaster_NN(NN_Trainer):
             gradient_fetch_requests=self.async_fetch_gradient_start()
 
             # wait for enough gradients to be aggregated:
+            '''
             while not enough_gradients_received:
                 status = MPI.Status()
                 if self._compress_grad == "None":
@@ -190,6 +193,10 @@ class SyncReplicasMaster_NN(NN_Trainer):
                 enough_gradients_received = True
                 for j in self.grad_accumulator.gradient_aggregate_counter:
                     enough_gradients_received = enough_gradients_received and (j >= self._num_grad_to_collect)
+            '''
+            for layer_idx, layer in enumerate(self.network.parameters()):
+                self.gather_buffer[layer_idx]=self.comm.gather(self.gather_buffer[layer_idx], root=0)
+            # need some test here
 
             grad_gather_duration = time.time()-grad_gather_start_time
             print("Master: gradient gather time: {:.4f}".format(grad_gather_duration))

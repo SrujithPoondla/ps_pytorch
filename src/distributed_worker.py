@@ -57,9 +57,6 @@ class ModelBuffer(object):
         self.recv_buf = []
         self.layer_cur_step = []
         self.layer_shape = []
-        '''
-        initialize space to receive model from parameter server
-        '''
         # consider we don't want to update the param of `BatchNorm` layer right now
         # we temporirially deprecate the foregoing version and only update the model
         # parameters
@@ -269,24 +266,16 @@ class DistributedWorker(NN_Trainer):
         self.network.load_state_dict(new_state_dict)
 
     def _send_grads(self):
-        req_send_check = []
         encode_time_counter_ = 0
         for p_index, p in enumerate(self.network.parameters()):
             if self._enable_gpu:
                 grad = p.grad.cpu().data.numpy().astype(np.float64)
             else:
                 grad = p.grad.data.numpy().astype(np.float64)
-            # wait until grad of last layer shipped to PS
-            if len(req_send_check) != 0:
-                req_send_check[-1].wait()
-            if self._compress_grad == "compress":
-                _compressed_grad = g_compress(grad)
-                req_isend = self.comm.isend(_compressed_grad, dest=0, tag=88+p_index)
-                req_send_check.append(req_isend)
-            else:
-                req_isend = self.comm.Isend([grad, MPI.DOUBLE], dest=0, tag=88+p_index)
-                req_send_check.append(req_isend)
-        req_send_check[-1].wait()
+            # gradient are always compressed in the pipeline before shipped to PS
+            _compressed_grad = g_compress(grad)
+            fake_req = self.comm.gather(_compressed_grad, root=0)
+            assert fake_req is None # sanity check defined in MPI4PY
 
     def _evaluate_model(self, test_loader):
         self.network.eval()
